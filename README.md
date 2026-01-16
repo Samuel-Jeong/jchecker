@@ -8,6 +8,98 @@ Validate two files!
 
 ## 구조
 ![스크린샷 2022-07-19 오전 10 48 58](https://user-images.githubusercontent.com/37236920/179646582-f71899d9-2b04-4bf7-b7f2-e0975155b636.png)
+
+## 전체 구조(컴포넌트/데이터 흐름) 다이어그램
+```mermaid
+flowchart TB
+  START([START]) --> SP["Scenario Path<br/>(실행 인자)"] --> SM["ServiceManager<br/>전체 오케스트레이션"]
+
+  %% Config
+  subgraph CFG["Config"]
+    MAIN["UCheckMain<br/>entry point"]
+    CM["ConfigManager<br/>user_conf.ini 로드<br/>- THREAD_POOL_SIZE<br/>- RESULT_FILE_PATH<br/>- DISCARD_KEYWORDS"]
+  end
+
+  MAIN --> CM --> SM
+
+  %% Scenario parse
+  subgraph PARSE["Scenario Loading / Parsing"]
+    P["ScenarioParser<br/>시나리오 JSON 파싱"]
+    SD["ScenarioDto"]
+    CD["CaseDto (N개)"]
+    S["Scenario (N개)<br/>id + expectedFile + actualFile"]
+  end
+
+  SM -->|1) Register| P --> SD -->|2) Parse Scenario| CD --> S
+
+  %% Validation models & compare
+  subgraph COMP["Validation / Compare"]
+    VH["ScenarioHandler<br/>line-by-line 비교<br/>DISCARD_KEYWORDS 포함 라인 제외"]
+    EM["Expected Model<br/>ValidationModel(fileName, line info)"]
+    AM["Actual Model<br/>ValidationModel(fileName, line info)"]
+  end
+
+  S --> VH
+  EM --> VH
+  AM --> VH
+  VH -->|5) Add result| AM
+
+  %% Run in parallel
+  subgraph EXEC["Parallel Execution"]
+    JS["JobScheduler(MAIN)<br/>시나리오 시작/분배"]
+    JP["ThreadPool<br/>THREAD_POOL_SIZE 기반"]
+    JE["JobExecutor (N개)<br/>Scenario 단위 실행"]
+  end
+
+  SM --> JS --> JP --> JE --> VH
+
+  %% Result
+  subgraph OUT["Output"]
+    V["Validator<br/>3) Add Scenario"]
+    VR["ValidationResult<br/>wrongCount/success 등 결과"]
+    RF["Result File<br/>RESULT_FILE_PATH(JSON 등)"]
+  end
+
+  S --> V --> VR --> SM
+  VR --> RF
+  SM --> PRINT["6) Print all validation results"] --> STOP([STOP])
+```
+
+## 실행 시퀀스(초기화 → 병렬 비교 → 결과 파일)
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as User
+  participant M as UCheckMain
+  participant C as ConfigManager
+  participant SM as ServiceManager
+  participant P as ScenarioParser
+  participant JS as JobScheduler
+  participant JE as JobExecutor
+  participant H as ScenarioHandler
+  participant V as Validator
+  participant R as ResultFile
+
+  U->>M: 실행(ScenarioPath, ConfigPath)
+  M->>C: user_conf.ini 로드<br/>THREAD_POOL_SIZE / RESULT_FILE_PATH / DISCARD_KEYWORDS
+  C-->>M: Config 반환
+  M->>SM: 서비스 시작
+
+  SM->>P: 시나리오 JSON 파싱
+  P-->>SM: Scenario 리스트( expectedFile/actualFile 포함 )
+
+  SM->>JS: 스케줄 시작(THREAD_POOL_SIZE 기반)
+  loop for each Scenario
+    JS->>JE: Scenario 전달(병렬)
+    JE->>H: expected vs actual 비교<br/>DISCARD_KEYWORDS 라인 제외
+    H-->>JE: diff/wrongCount 누적
+  end
+
+  SM->>V: 전체 Scenario 결과 취합
+  V-->>SM: ValidationResult
+  SM->>R: RESULT_FILE_PATH로 결과 파일 저장
+  SM-->>U: 콘솔 요약 출력
+```
   
 ## 실행 예시
 ~~~
