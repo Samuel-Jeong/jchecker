@@ -12,57 +12,62 @@ Validate two files!
 ## 전체 구조(컴포넌트/데이터 흐름) 다이어그램
 ```mermaid
 flowchart TB
-  START([START]) --> SP["Scenario Path<br/>(실행 인자)"] --> SM["ServiceManager<br/>전체 오케스트레이션"]
+  START([START]) --> SP[Scenario Path]
+  SP --> SM[ServiceManager]
 
-  %% Config
-  subgraph CFG["Config"]
-    MAIN["UCheckMain<br/>entry point"]
-    CM["ConfigManager<br/>user_conf.ini 로드<br/>- THREAD_POOL_SIZE<br/>- RESULT_FILE_PATH<br/>- DISCARD_KEYWORDS"]
+  subgraph CFG[Config]
+    MAIN[UCheckMain]
+    CM[ConfigManager<br/>load user_conf.ini<br/>THREAD_POOL_SIZE<br/>RESULT_FILE_PATH<br/>DISCARD_KEYWORDS]
   end
 
-  MAIN --> CM --> SM
-
-  %% Scenario parse
-  subgraph PARSE["Scenario Loading / Parsing"]
-    P["ScenarioParser<br/>시나리오 JSON 파싱"]
-    SD["ScenarioDto"]
-    CD["CaseDto (N개)"]
-    S["Scenario (N개)<br/>id + expectedFile + actualFile"]
+  subgraph PARSE[Scenario Loading and Parsing]
+    P[ScenarioParser]
+    SD[ScenarioDto]
+    CD[CaseDto]
+    S[Scenario<br/>id expectedFile actualFile]
   end
 
-  SM -->|1) Register| P --> SD -->|2) Parse Scenario| CD --> S
-
-  %% Validation models & compare
-  subgraph COMP["Validation / Compare"]
-    VH["ScenarioHandler<br/>line-by-line 비교<br/>DISCARD_KEYWORDS 포함 라인 제외"]
-    EM["Expected Model<br/>ValidationModel(fileName, line info)"]
-    AM["Actual Model<br/>ValidationModel(fileName, line info)"]
+  subgraph EXEC[Parallel Execution]
+    JS[JobScheduler MAIN]
+    JP[ThreadPool<br/>THREAD_POOL_SIZE]
+    JE[JobExecutor]
   end
+
+  subgraph COMP[Validation and Compare]
+    VH[ScenarioHandler<br/>line by line compare<br/>discard keywords]
+    EM[ExpectedModel]
+    AM[ActualModel]
+  end
+
+  subgraph OUT[Output]
+    V[Validator]
+    VR[ValidationResult]
+    RF[ResultFile<br/>RESULT_FILE_PATH]
+  end
+
+  MAIN --> CM
+  CM --> SM
+
+  SM --> P
+  P --> SD
+  SD --> CD
+  CD --> S
+
+  SM --> JS
+  JS --> JP
+  JP --> JE
+  JE --> VH
 
   S --> VH
   EM --> VH
-  AM --> VH
-  VH -->|5) Add result| AM
+  VH --> AM
 
-  %% Run in parallel
-  subgraph EXEC["Parallel Execution"]
-    JS["JobScheduler(MAIN)<br/>시나리오 시작/분배"]
-    JP["ThreadPool<br/>THREAD_POOL_SIZE 기반"]
-    JE["JobExecutor (N개)<br/>Scenario 단위 실행"]
-  end
-
-  SM --> JS --> JP --> JE --> VH
-
-  %% Result
-  subgraph OUT["Output"]
-    V["Validator<br/>3) Add Scenario"]
-    VR["ValidationResult<br/>wrongCount/success 등 결과"]
-    RF["Result File<br/>RESULT_FILE_PATH(JSON 등)"]
-  end
-
-  S --> V --> VR --> SM
+  S --> V
+  V --> VR
   VR --> RF
-  SM --> PRINT["6) Print all validation results"] --> STOP([STOP])
+
+  SM --> VR
+  VR --> STOP([STOP])
 ```
 
 ## 실행 시퀀스(초기화 → 병렬 비교 → 결과 파일)
